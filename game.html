@@ -99,30 +99,48 @@ function renderGate(){
   $('jump').disabled=!allowed;
   $('connect').textContent=publicKey?'REFRESH BALANCE':'CONNECT PHANTOM';
 }
+
 async function connect(){
-  if(!window.solana || !window.solana.isPhantom){
-    status('Phantom not detected. Open this page in Chrome with the Phantom extension enabled.');
+  const walletProvider = window.phantom?.solana || window.solana;
+
+  if(!walletProvider || !walletProvider.isPhantom){
+    status('Phantom not detected. Please open this page in Chrome with the Phantom extension enabled.');
     return;
   }
-  provider=window.solana;
+
+  provider = walletProvider;
+
   try{
     if(!publicKey){
-      const resp=await provider.connect();
-      publicKey=resp.publicKey.toString();
+      const resp = await provider.connect();
+      publicKey = resp.publicKey.toString();
     }
-    $('wallet').textContent='Wallet: '+shortKey(publicKey);
-    status('Wallet connected. Checking JGHOST balance…');
-    const amount=await readBalance(publicKey);
-    balance=amount;allowed=amount>=REQUIRED;
-    status('JGHOST balance: '+amount.toLocaleString(undefined,{maximumFractionDigits:4})+' / '+REQUIRED+'. '+(allowed?'Access granted — have fun!':'You need at least 1,000 JGHOST to play.'));
+
+    $('wallet').textContent = 'Wallet: ' + shortKey(publicKey);
+    status('Wallet connected. Checking JGHOST balance...');
+
+    const amount = await readBalance(publicKey);
+    balance = amount;
+    allowed = amount >= REQUIRED;
+
+    status('JGHOST balance: ' + amount.toLocaleString(undefined,{maximumFractionDigits:4}) +
+      ' / ' + REQUIRED + '. ' +
+      (allowed ? 'Access granted - have fun!' : 'You need at least 1,000 JGHOST to play.'));
   }catch(e){
-    allowed=false;
-    status('Could not read Solana balance: '+(e.message||'RPC unavailable')+'. Try again in a moment.');
+    allowed = false;
+    status('Could not read Solana balance: ' + (e.message || 'RPC unavailable') + '. Try again in a moment.');
   }
+
   renderGate();
 }
+
 $('connect').addEventListener('click',connect);
-if(window.solana?.isPhantom){provider=window.solana;status('Phantom detected. Connect your wallet to check balance.')}
+
+if((window.phantom?.solana || window.solana)?.isPhantom){
+  provider = window.phantom?.solana || window.solana;
+  status('Phantom detected. Connect your wallet to check balance.');
+}
+
 if(window.solana?.on){
   window.solana.on('accountChanged',async key=>{
     publicKey=key?key.toString():null;allowed=false;balance=0;renderGate();
