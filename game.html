@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101010">
+<title>Ghost Runner | JacketGhost</title>
+<style>
+:root{--orange:#ff5a12;--cream:#fff1d8;--bg:#101010;--muted:#bcb5aa;--line:#493323;--panel:#1a1512}
+*{box-sizing:border-box}
+body{margin:0;padding:18px;background:var(--bg);color:var(--cream);font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1050px;margin:auto}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.brand{font-weight:950;letter-spacing:.08em}.brand span{color:var(--orange)}
+.link{border:1px solid var(--line);padding:10px 13px;border-radius:8px;font-size:13px}
+h1{font-size:clamp(32px,6vw,48px);margin:24px 0 4px;text-transform:uppercase}
+.sub{color:var(--muted);margin:0 0 16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+.hud{display:flex;justify-content:space-between;gap:12px;padding:2px 4px 14px}
+.stat{font-size:11px;color:var(--muted);letter-spacing:.1em}.stat b{display:block;color:var(--cream);font-size:22px;letter-spacing:0}
+.gate{margin:0 0 12px;padding:14px;border:1px solid #754022;border-radius:10px;background:#241812;text-align:center}
+.gate h2{margin:0 0 6px;font-size:18px}.gate p{margin:5px auto 10px;color:#d7cabc;font-size:13px;line-height:1.5}
+button{border:0;border-radius:8px;padding:12px 18px;font-weight:900;cursor:pointer;background:var(--orange);color:#160d08}
+button.secondary{background:#28221e;color:var(--cream);border:1px solid #604631}
+button:disabled{opacity:.55;cursor:not-allowed}
+.actions{display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap}
+.status{font-size:12px;color:#ffb347;margin-top:9px;min-height:18px}
+.wallet{font-size:11px;color:var(--muted);margin-top:4px}
+canvas{width:100%;height:auto;display:block;background:#0d0b0a;border:1px solid var(--line);border-radius:10px;touch-action:pan-y}
+.controls{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+.help{font-size:12px;color:var(--muted);line-height:1.6}
+.note{text-align:center;color:#8e8175;font-size:11px;margin-top:12px}
+@media(max-width:600px){body{padding:10px}.panel{padding:9px}.controls{align-items:stretch}.controls button{flex:1}.help{width:100%}.hud{padding-bottom:10px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="top"><div class="brand">JACKET<span>GHOST</span></div><a class="link" href="./index.html">← Back to website</a></div>
+  <h1>Ghost Runner</h1><p class="sub">Run wild. Dodge the trouble. Join the Ghost Gang.</p>
+  <section class="panel">
+    <div class="hud">
+      <div class="stat">SCORE<b id="score">0</b></div>
+      <div class="stat">BEST<b id="best">0</b></div>
+      <div class="stat">SPEED<b id="speed">1.0X</b></div>
+    </div>
+    <div class="gate" id="gate">
+      <h2>HOLD 1,000 JGHOST TO PLAY</h2>
+      <p>Connect your Solana wallet. We only check your public JGHOST balance. No transaction, approval, or signature is requested.</p>
+      <div class="actions"><button id="connect">CONNECT PHANTOM</button><a class="link" href="https://launch.rings.run/token/4ZEBAApyJSc1X1sFvxmV6RcGNpaVzWExTddzoAvRucaA" target="_blank" rel="noopener noreferrer">GET JGHOST ↗</a></div>
+      <div class="status" id="status" aria-live="polite">Wallet not connected.</div>
+      <div class="wallet" id="wallet"></div>
+    </div>
+    <canvas id="game" width="960" height="420" aria-label="Ghost Runner game"></canvas>
+    <div class="controls">
+      <div class="help">Keyboard: <b>Space / ↑</b> jump · <b>↓</b> duck<br>Phone/tablet: tap JUMP or tap the game area.</div>
+      <div class="actions"><button class="secondary" id="restart">RESTART</button><button id="jump" disabled>JUMP ↗</button></div>
+    </div>
+    <p class="note">A free JacketGhost community mini-game. Holding 1,000 JGHOST is checked from your public wallet balance. No tokens are taken.</p>
+  </section>
+</main>
+<script>
+(() => {
+'use strict';
+const MINT='4ZEBAApyJSc1X1sFvxmV6RcGNpaVzWExTddzoAvRucaA';
+const REQUIRED=1000, DECIMALS=6;
+const RPCS=['https://solana-rpc.publicnode.com','https://api.mainnet-beta.solana.com'];
+const $=id=>document.getElementById(id);
+const canvas=$('game'),ctx=canvas.getContext('2d');
+let provider=null, publicKey=null, balance=0, allowed=false, running=false, over=false;
+let score=0,best=Number(localStorage.getItem('jg_runner_best')||0),speed=6,frame=0,obstacles=[],spawn=70,playerY=344,vy=0,duck=0;
+$('best').textContent=best;
+function status(s){$('status').textContent=s}
+function shortKey(k){return k? k.slice(0,4)+'…'+k.slice(-4):''}
+async function rpc(method,params){
+  let last;
+  for(const endpoint of RPCS){
+    try{
+      const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j=await r.json(); if(j.error) throw new Error(j.error.message||'RPC error');
+      return j.result;
+    }catch(e){last=e}
+  }
+  throw last||new Error('RPC unavailable');
+}
+async function readBalance(owner){
+  const result=await rpc('getTokenAccountsByOwner',[owner,{mint:MINT},{encoding:'jsonParsed',commitment:'confirmed'}]);
+  let total=0;
+  for(const item of (result.value||[])){
+    const info=item.account.data.parsed.info;
+    const amount=info.tokenAmount.uiAmount;
+    if(Number.isFinite(amount)) total+=amount;
+    else total+=Number(info.tokenAmount.amount||0)/Math.pow(10,DECIMALS);
+  }
+  return total;
+}
+function renderGate(){
+  $('jump').disabled=!allowed;
+  $('connect').textContent=publicKey?'REFRESH BALANCE':'CONNECT PHANTOM';
+}
+async function connect(){
+  if(!window.solana || !window.solana.isPhantom){
+    status('Phantom not detected. Open this page in Chrome with the Phantom extension enabled.');
+    return;
+  }
+  provider=window.solana;
+  try{
+    if(!publicKey){
+      const resp=await provider.connect();
+      publicKey=resp.publicKey.toString();
+    }
+    $('wallet').textContent='Wallet: '+shortKey(publicKey);
+    status('Wallet connected. Checking JGHOST balance…');
+    const amount=await readBalance(publicKey);
+    balance=amount;allowed=amount>=REQUIRED;
+    status('JGHOST balance: '+amount.toLocaleString(undefined,{maximumFractionDigits:4})+' / '+REQUIRED+'. '+(allowed?'Access granted — have fun!':'You need at least 1,000 JGHOST to play.'));
+  }catch(e){
+    allowed=false;
+    status('Could not read Solana balance: '+(e.message||'RPC unavailable')+'. Try again in a moment.');
+  }
+  renderGate();
+}
+$('connect').addEventListener('click',connect);
+if(window.solana?.isPhantom){provider=window.solana;status('Phantom detected. Connect your wallet to check balance.')}
+if(window.solana?.on){
+  window.solana.on('accountChanged',async key=>{
+    publicKey=key?key.toString():null;allowed=false;balance=0;renderGate();
+    if(publicKey){$('wallet').textContent='Wallet: '+shortKey(publicKey);await connect()}
+    else{$('wallet').textContent='';status('Wallet disconnected.')}
+    stopGame();
+  });
+}
+async function recheck(){
+  if(!publicKey)return false;
+  try{balance=await readBalance(publicKey);allowed=balance>=REQUIRED;status('JGHOST balance: '+balance.toLocaleString(undefined,{maximumFractionDigits:4})+'. '+(allowed?'Access active.':'Access paused: hold at least 1,000 JGHOST.'));renderGate();if(!allowed)stopGame();return allowed}
+  catch(e){status('Balance check failed (RPC). Game paused until balance can be verified.');allowed=false;renderGate();stopGame();return false}
+}
+function start(){if(!allowed){status('Connect a wallet holding at least 1,000 JGHOST first.');return}if(over)reset();running=true;over=false}
+function stopGame(){running=false}
+function reset(){score=0;speed=6;frame=0;obstacles=[];spawn=65;playerY=344;vy=0;duck=0;over=false;running=false;updateHud();draw()}
+function updateHud(){$('score').textContent=Math.floor(score);$('speed').textContent=(speed/6).toFixed(1)+'X'}
+function jump(){if(!allowed){status('Connect a wallet holding at least 1,000 JGHOST first.');return}if(!running&&!over){start();return}if(running&&playerY>=343){vy=-15;duck=0}}
+function drawGhost(x,y){
+  ctx.fillStyle='#aaa39a';ctx.beginPath();ctx.moveTo(x-22,y);ctx.lineTo(x-22,y-42);ctx.quadraticCurveTo(x-22,y-68,x,y-68);ctx.quadraticCurveTo(x+22,y-68,x+22,y-42);ctx.lineTo(x+22,y);ctx.lineTo(x+10,y-8);ctx.lineTo(0,y);ctx.lineTo(x-10,y-8);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#080707';ctx.beginPath();ctx.ellipse(x-8,y-48,5,9,0,0,Math.PI*2);ctx.ellipse(x+8,y-48,5,9,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#ff5a12';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x-12,y-34);ctx.lineTo(x-3,y-23);ctx.lineTo(x,y-31);ctx.lineTo(x+5,y-23);ctx.lineTo(x+13,y-34);ctx.stroke();
+}
+function draw(){
+  ctx.clearRect(0,0,960,420);ctx.fillStyle='#0d0b0a';ctx.fillRect(0,0,960,420);
+  ctx.fillStyle='#17110d';for(let i=0;i<10;i++){let x=i*110-(frame*0.5%110);ctx.fillRect(x,290,55,90)}
+  ctx.fillStyle='#211812';ctx.fillRect(0,344,960,76);
+  ctx.strokeStyle='#7b3214';ctx.setLineDash([22,24]);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,382);ctx.lineTo(960,382);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#ff5a12';for(const o of obstacles){ctx.fillRect(o.x,344-o.h,o.w,o.h);ctx.fillRect(o.x+8,344-o.h-8,Math.max(8,o.w-16),8)}
+  drawGhost(145,playerY);
+  if(!running&&!over){
+    ctx.textAlign='center';ctx.fillStyle='#fff1d8';ctx.font='bold 48px system-ui';ctx.fillText('GHOST RUNNER',480,170);
+    ctx.fillStyle='#ff8a52';ctx.font='bold 22px system-ui';ctx.fillText('A little spooky. A lot of fun.',480,218);
+    ctx.fillStyle='#bcb5aa';ctx.font='16px system-ui';ctx.fillText(allowed?'Press SPACE or tap JUMP to start':'Connect wallet and hold 1,000 JGHOST to play',480,270);
+  }
+  if(over){ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(0,0,960,420);ctx.textAlign='center';ctx.fillStyle='#fff1d8';ctx.font='bold 48px system-ui';ctx.fillText('GAME OVER',480,190);ctx.font='18px system-ui';ctx.fillText('Press RESTART to run again',480,230)}
+}
+function tick(){
+  if(running){
+    frame++;score+=.12;speed=Math.min(12,speed+.0015);spawn--;
+    if(spawn<=0){const h=28+Math.random()*35,w=20+Math.random()*18;obstacles.push({x:980,w,h});spawn=55+Math.random()*55-(speed-6)*4}
+    obstacles.forEach(o=>o.x-=speed);obstacles=obstacles.filter(o=>o.x+o.w>0);
+    vy+=.72;playerY=Math.min(344,playerY+vy);if(playerY>=344)vy=0;
+    const hit=obstacles.some(o=>o.x<167&&o.x+o.w>123&&playerY>344-o.h+4);
+    if(hit){running=false;over=true;if(Math.floor(score)>best){best=Math.floor(score);localStorage.setItem('jg_runner_best',best)}$('best').textContent=best}
+    updateHud();
+  }
+  draw();requestAnimationFrame(tick);
+}
+$('jump').addEventListener('click',jump);
+$('restart').addEventListener('click',()=>{if(!allowed){reset();status('Connect a wallet holding at least 1,000 JGHOST first.');return}reset();start()});
+canvas.addEventListener('pointerdown',e=>{e.preventDefault();jump()});
+window.addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();jump()}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopGame()});
+setInterval(()=>{if(publicKey&&allowed)recheck()},30000);
+reset();tick();
+})();
+</script>
+</body>
+</html>
